@@ -4,7 +4,7 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
-import time
+import datetime
 
 
 class Network:
@@ -14,45 +14,48 @@ class Network:
         self.ppp = ppp # Prob that node A is malicious
         self.k = k # Number of simulation steps
         self.nTx = 10*self.k # Total number of transactions
-        self.Tx_id = 0
+        self.Tx_id = 0  # ID of each transaction
         self.pp = pp # Probability that node A receive a message in each iteration
         self.consensus_array = [] # Dictionary with the consensus information of size iterations x nodes
         self.consensus_dict = {}
-        self.G = self.GenNetwork(n, p)
-        self.malicious_nodes(ppp)
+        self.G = self.GenNetwork()
+        self.malicious_nodes()
 
-    def GenNetwork(self, n, p):
-        # Graph creation
+    def GenNetwork(self):
+        """
+        Graph creation using networkx DiGraph method using:
+            - self.n (number of nodes)
+            - self.p (probability that Node A is connected with a directed edge with B)
+        It returns only when generates a strongly connected graph, so it could take long for large values of n and small values of p.
+        This method returns the first strongly connected graph generate
+        """
         strongly_connected = False
-        its = 0
         while strongly_connected == False:
             G = nx.DiGraph()
 
             # Nodes creation
-            nodes = [i for i in range(1, n+1)]
+            nodes = [i for i in range(1, self.n + 1)]
             G.add_nodes_from(nodes)
 
             # Edges creation
             permutations = list(itertools.permutations(nodes, r=2))
             edges = []
             for edge in permutations:
-                if random.random() < p: # Edge is added
+                if random.random() < self.p: # Edge is added
                     edges.append(edge)
-                else: # Edge is rejected
-                    pass
             G.add_edges_from(edges)
             strongly_connected = nx.is_strongly_connected(G)
-            #print('Its: {}'.format(its))
-            its += 1
-
-        #print('Strongly connected graph')
         return G
 
-    def malicious_nodes(self, ppp):
+    def malicious_nodes(self, verbose=False):
+        """
+        Define what nodes will be malicious using self.ppp value as the probability of a node of being malicious.
+        This method return the number of malicious and non-malicious nodes.
+        """
         malicious = 0
         for node in self.G.nodes(data=False):
             self.G.node[node]['Txs'] = [] # Transactions list
-            if random.random() < ppp:  # Node is malicious
+            if random.random() < self.ppp:  # Node is malicious
                 self.G.node[node]['malicious'] = True
                 self.G.node[node]['behavior'] = random.choice([1, 2, 3])
                 if self.G.node[node]['behavior'] == 3:
@@ -62,28 +65,44 @@ class Network:
 
 
                 malicious += 1
-            else:
+            else:  # Node is not malicious
                 self.G.node[node]['malicious'] = False
                 self.G.node[node]['behavior'] = -1
                 self.G.node[node]['past_behavior'] = -1
 
-        #print('Malicious nodes: {}'.format(malicious))
-        #print('Good nodes: {}'.format(self.n - malicious))
+        if verbose:
+            print('Malicious nodes: {}'.format(malicious))
+            print('Good nodes: {}'.format(self.n - malicious))
+        return malicious, self.n - malicious
 
-    def generate_transactions(self, txs=10):
+    def generate_transactions(self, txs=10, tx_min_value=0, tx_max_value=1):
+        """
+        Generate a list of 'txs' transactions. Each transaction is a dictionary with the following:
+            - 'type': 'Transaction'
+            - 'value': a floating random number between tx_min_value and tx_max_value
+            - 'uniqueID': self.Tx_id. Each transction will be increasing this number in 1
+        This method returns the list of transactions generated.
+        """
         txs_list = []
-        for i in range(txs):
-            txs_list.append({'type': 'Transaction', 'value': random.random(), 'uniqueID': self.Tx_id})
+        for _ in range(txs):
+            txs_list.append({'type': 'Transaction', 'value': random.uniform(tx_min_value, tx_max_value), 'uniqueID': self.Tx_id})
             self.Tx_id += 1
         return txs_list
 
-    def broadcast_transactions(self, txs_list, pp=0.2):
+    def broadcast_transactions(self, txs_list):
+        """
+        Apply function send_message_to_neighbors for each node if it is not malicious
+        """
         for tx in txs_list:
             for node in self.G.nodes(data=False):
-                if random.random() < pp:  # Node is malicious
+                if random.random() < self.pp:  # Node is malicious
                     self.send_message_to_neighbors(node, tx, inital_message=True)
 
     def send_message_to_neighbors(self, node, tx, inital_message=False):
+        """
+        A single node sends a transaction (tx) to all its neighbors.
+        The paramater inital_message indicates a malicious node that it will send only the initial message
+        """
         if tx in self.G.node[node]['Txs']: # If I already have the transaction
             return
         else:
@@ -96,6 +115,14 @@ class Network:
                 self.malicious_node_behaviors(node, tx, inital_message)
 
     def malicious_node_behaviors(self, node, tx, initial_message=False):
+        """
+        If a node is malicious, its behaviour will be one of the following, each one with the same probability:
+            - (1) It will act as a 'dead node' and never broadcast any message to its followers
+            - (2) It will only broadcast the messages sent at the beginning of the round, and it will never broadcast 
+            the messages it heard from another nodes
+            - (3) It will alternate between the two previous behaviours in different rounds (past_behavior will be 
+            saved in each node)
+        """
         behavior = self.G.node[node]['behavior']
         past_behavior = self.G.node[node]['past_behavior']
         if behavior == 1:
@@ -120,6 +147,10 @@ class Network:
         return
 
     def consensus(self):
+        """
+        Two nodes are in consensus about the messages they received, if their list of received transactions is precisely the same. 
+        Thus, this method calculates the number of node that are in consensus with each node of the graph, put the numbers in a list and return.
+        """
         iteration_list = []
         for i in self.G.nodes(data=False):
             Txs_i = self.G.node[i]['Txs']
@@ -133,26 +164,26 @@ class Network:
             iteration_list.append(consensus_i)
         return iteration_list
 
-    def simulation(self):
+    def simulation(self, txs_per_round=10, verbose=False):
+        """
+        Generate transactions, broadcast each one, get the consensus and save it in a list. In each iteration, save a dict with the following info:
+            - 'max_consensus': 
+            - 'n_consensus': 
+        Finally, return a list with all consensus and dictionaries created.
+        """
         consensus_array = []
         consensus_dict = {}
-        for i in range(self.k): # K rounds
-            # Generate transactions
-            txs_list = self.generate_transactions(txs=10)
+        for i in range(self.k):
+            txs_list = self.generate_transactions(txs=txs_per_round)
 
-            # Broadcast transactions
-            self.broadcast_transactions(txs_list, self.pp)
+            self.broadcast_transactions(txs_list)
 
-            # Consensus
-            iteration_list = self.consensus() # List with the number of nodes in consensus in each iteration
+            iteration_list = self.consensus()
             consensus_array.append(iteration_list)
-            consensus_dict['it{}'.format(i + 1)] = {'max_consensus': max(iteration_list),
-                                                      'n_consensus': len(set(iteration_list))}
+            consensus_dict['it{}'.format(i + 1)] = {'max_consensus': max(iteration_list), 'n_consensus': len(set(iteration_list))}
 
-
-            #print('it: {} | Max_consensus: {} | N_consensus: {}'.format(i + 1, consensus_dict['max_consensus'], consensus_dict['n_consensus']))
-            #print(consensus_list, '\n')
-
+            if verbose:
+                print('it: {} | Max_consensus: {} | N_consensus: {}'.format(i + 1, consensus_dict['max_consensus'], consensus_dict['n_consensus']))
         return np.array(consensus_array), consensus_dict
 
 
@@ -161,13 +192,12 @@ def simulate_N(N=100, **kwargs):
     '''
     Makes N simulations (entire runs of k iterations)
     '''
-    consensus = {}
     max_consensus = []
     n_consensus = []
     for i in range(N):
         print('Simulation: {}|{}'.format(i + 1, N))
         net = Network(**kwargs)
-        consensus_array_i, consensus_dict_i = net.simulation()
+        _, consensus_dict_i = net.simulation()
         max_consensus_i = []
         n_consensus_i = []
         for t in range(kwargs['k']):
@@ -190,6 +220,9 @@ def simulate_N(N=100, **kwargs):
 
 
 def vary_parameters(N=100, initial_params={'n': 20, 'p': 0.4, 'ppp': 0.1, 'k': 30, 'pp': 0.2}, vary_dimension={'k':[10, 110, 10]}):
+    """
+    Run len(vary_dimension_values) simulations with initial_params. In each simulation the parameter 
+    """
     vary_dimension_key = list(vary_dimension.keys())[0]
     vvalues = list(vary_dimension.values())[0]
     vary_dimension_values = [i for i in range(vvalues[0], vvalues[1], vvalues[2])]
@@ -208,11 +241,14 @@ def vary_parameters(N=100, initial_params={'n': 20, 'p': 0.4, 'ppp': 0.1, 'k': 3
 
 if __name__ == '__main__':
 
+    t0 = datetime.datetime.now()
     arguments = {'n': 20, 'p': 0.4, 'ppp': 0.1, 'k': 100, 'pp': 0.2}
 
 
-    [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std] = simulate_N(N=75, **arguments)
+    [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std] = simulate_N(N=150, **arguments)
     its = [i + 1 for i in range(max_consensus_mean.shape[0])]
+
+    print('Simulations finished in', datetime.datetime.now() - t0)
 
     plt.figure()
     plt.title('Max consensus')
