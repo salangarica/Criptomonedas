@@ -12,13 +12,11 @@ class Network:
     def __init__(self, n=10, p=0.3, ppp=0.3, k=20, pp=0.1):
         self.n = n # Number of nodes
         self.p = p # Prob that Node A is connected with a directed edge with B
+        self.pp = pp # Probability that node A receive a message in each iteration
         self.ppp = ppp # Prob that node A is malicious
         self.k = k # Number of simulation steps
         self.nTx = 10*self.k # Total number of transactions
         self.Tx_id = 0  # ID of each transaction
-        self.pp = pp # Probability that node A receive a message in each iteration
-        self.consensus_array = [] # Dictionary with the consensus information of size iterations x nodes
-        self.consensus_dict = {}
         self.G = self.GenNetwork()
         self.malicious_nodes()
 
