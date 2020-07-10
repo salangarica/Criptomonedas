@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import copy
 import datetime
+import argparse
 
 
 class Network:
@@ -244,8 +245,11 @@ if __name__ == '__main__':
     t0 = datetime.datetime.now()
     arguments = {'n': 20, 'p': 0.4, 'ppp': 0.1, 'k': 100, 'pp': 0.2}
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument("n", help="Number of simulations that will be calculated", default=75, type=int, nargs='?')
+    args = parser.parse_args()
 
-    [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std] = simulate_N(N=150, **arguments)
+    [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std] = simulate_N(N=args.n, **arguments)
     its = [i + 1 for i in range(max_consensus_mean.shape[0])]
 
     print('Simulations finished in', datetime.datetime.now() - t0)
