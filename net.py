@@ -6,10 +6,14 @@ import matplotlib.pyplot as plt
 import copy
 import datetime
 import argparse
+from pylab import rcParams
+import os
+rcParams['figure.figsize'] = 17, 7
+rcParams.update({'font.size': 15})
 
 
 class Network:
-    def __init__(self, n=10, p=0.3, ppp=0.3, k=20, pp=0.1):
+    def __init__(self, n=10, p=0.3, ppp=0.3, k=20, pp=0.1, G=None):
         self.n = n # Number of nodes
         self.p = p # Prob that Node A is connected with a directed edge with B
         self.pp = pp # Probability that node A receive a message in each iteration
@@ -17,7 +21,10 @@ class Network:
         self.k = k # Number of simulation steps
         self.nTx = 10*self.k # Total number of transactions
         self.Tx_id = 0  # ID of each transaction
-        self.G = self.GenNetwork()
+        if G == None:
+            self.G = self.GenNetwork()
+        else:
+            self.G = G
         self.malicious_nodes()
 
     def GenNetwork(self):
@@ -187,15 +194,20 @@ class Network:
 
 
 
-def simulate_N(N=100, **kwargs):
+def simulate_N(N=100, maintain_graph=False, **kwargs):
     '''
     Makes N simulations (entire runs of k iterations)
     '''
     max_consensus = []
     n_consensus = []
+    G = Network(**kwargs).GenNetwork()
     for i in range(N):
         print('Simulation: {}|{}'.format(i + 1, N))
-        net = Network(**kwargs)
+        if maintain_graph:
+            net = Network(G=G, **kwargs)
+        else:
+            net = Network(**kwargs)
+
         _, consensus_dict_i = net.simulation()
         max_consensus_i = []
         n_consensus_i = []
@@ -218,51 +230,114 @@ def simulate_N(N=100, **kwargs):
     return [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std]
 
 
-def vary_parameters(N=100, initial_params={'n': 20, 'p': 0.4, 'ppp': 0.1, 'k': 30, 'pp': 0.2}, vary_dimension={'k':[10, 110, 10]}):
+def vary_parameters(N=100, maintain_graph=False, initial_params={'n': 20, 'p': 0.4, 'ppp': 0.1, 'k': 30, 'pp': 0.2}, vary_dimension={'k':[10, 110, 10]}):
     """
     Run len(vary_dimension_values) simulations with initial_params. In each simulation the parameter 
     """
     vary_dimension_key = list(vary_dimension.keys())[0]
     vvalues = list(vary_dimension.values())[0]
-    vary_dimension_values = [i for i in range(vvalues[0], vvalues[1], vvalues[2])]
+    vary_dimension_values = np.arange(vvalues[0], vvalues[1], vvalues[2])
 
     dicto_vary = {}
     for value in vary_dimension_values:
         params = copy.deepcopy(initial_params)
         params[vary_dimension_key] = value
-        [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std] = simulate_N(N=N, **params)
-        dicto_vary['{}:{}'.format(vary_dimension_key, value)] = {'max_consensus': [max_consensus_mean[-1], max_consensus_std[-1]],
+        [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std] = simulate_N(N=N, maintain_graph=maintain_graph, **params)
+        dicto_vary[(vary_dimension_key, value)] = {'max_consensus': [max_consensus_mean[-1], max_consensus_std[-1]],
                                                                  'n_consensus':[n_consensus_mean[-1], n_consensus_std[-1]]}
 
         print('{}:{} -> Max_consensus: {} | N_consensus: {}'.format(vary_dimension_key, value, max_consensus_mean[-1], n_consensus_mean[-1]))
 
     return dicto_vary
 
+
+####################################### Plotting functions #######################################################
+
+def plot_simulation(max_consensus_mean, max_consensus_std, n_consensus_mean, n_consensus_std, show=True,
+                    folder='Imgs/', save_name='im', save=False):
+    '''
+    Plot the results of simulate_N function
+    '''
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+
+    its = [i + 1 for i in range(max_consensus_mean.shape[0])]
+
+    plt.figure()
+    plt.title('Max consensus', fontsize=20)
+    plt.errorbar(its, max_consensus_mean, max_consensus_std, ecolor='k', alpha=0.5)
+    plt.plot(its, max_consensus_mean, linewidth=2)
+    plt.grid()
+    plt.xlabel('Iterations (k)', fontsize=17)
+    plt.tight_layout()
+    if save:
+        plt.savefig('{}{}_max_consensus.svg'.format(folder, save_name))
+
+    plt.figure()
+    plt.title('N consensus', fontsize=20)
+    plt.plot(its, n_consensus_mean, linewidth=2)
+    plt.errorbar(its, n_consensus_mean, n_consensus_std, ecolor='k', alpha=0.5)
+    plt.xlabel('Iterations (k)', fontsize=17)
+    plt.grid()
+    plt.tight_layout()
+
+    if save:
+        plt.savefig('{}{}_n_consensus.svg'.format(folder, save_name))
+
+    if show:
+        plt.show()
+
+
+
+def plot_vary_parameters(dict_vary, show=True, folder='Imgs/', save_name='im', save=False):
+
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    keys = list(dict_vary.keys())
+    keys = sorted(keys, key=lambda x: x[1]) # Order Keys
+    max_consensus_mean = [dict_vary[key]['max_consensus'][0] for key in keys]
+    max_consensus_std = [dict_vary[key]['max_consensus'][1] for key in keys]
+    n_consensus_mean = [dict_vary[key]['n_consensus'][0] for key in keys]
+    n_consensus_std = [dict_vary[key]['n_consensus'][1] for key in keys]
+    x_axis = [key[1] for key in keys]
+    vary_dimension = keys[0][0]
+
+    plt.figure()
+    plt.title('Max consensus varying {}'.format(vary_dimension), fontsize=20)
+    plt.errorbar(x_axis, max_consensus_mean, max_consensus_std, ecolor='firebrick', alpha=0.5)
+    plt.plot(x_axis, max_consensus_mean, linewidth=2)
+    plt.grid()
+    plt.xlabel(vary_dimension, fontsize=17)
+    plt.tight_layout()
+    if save:
+        plt.savefig('{}{}_max_consensus.svg'.format(folder, save_name))
+
+    plt.figure()
+    plt.title('N consensus varying {}'.format(vary_dimension), fontsize=20)
+    plt.errorbar(x_axis, n_consensus_mean, n_consensus_std, ecolor='firebrick', alpha=0.5)
+    plt.plot(x_axis, n_consensus_mean, linewidth=2)
+    plt.grid()
+    plt.xlabel(vary_dimension, fontsize=17)
+    plt.tight_layout()
+    if save:
+        plt.savefig('{}{}_n_consensus.svg'.format(folder, save_name))
+
+    if show:
+        plt.show()
+
+
 if __name__ == '__main__':
 
     t0 = datetime.datetime.now()
-    arguments = {'n': 20, 'p': 0.4, 'ppp': 0.1, 'k': 100, 'pp': 0.2}
+    arguments = {'n': 20, 'p': 0.4, 'ppp': 0.1, 'k': 50, 'pp': 0.2}
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("n", help="Number of simulations that will be calculated", default=75, type=int, nargs='?')
+    parser.add_argument("n", help="Number of simulations that will be calculated", default=15, type=int, nargs='?')
     args = parser.parse_args()
 
-    [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std] = simulate_N(N=args.n, **arguments)
-    its = [i + 1 for i in range(max_consensus_mean.shape[0])]
+    [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std] = simulate_N(N=args.n, maintain_graph=False, **arguments)
 
     print('Simulations finished in', datetime.datetime.now() - t0)
-
-    plt.figure()
-    plt.title('Max consensus')
-    plt.plot(its, max_consensus_mean)
-    plt.errorbar(its, max_consensus_mean, max_consensus_std)
-    plt.grid()
-
-    plt.figure()
-    plt.title('N consensus')
-    plt.plot(its, n_consensus_mean)
-    plt.errorbar(its, n_consensus_mean, n_consensus_std)
-    plt.grid()
-
-    plt.show()
+    plot_simulation(max_consensus_mean, max_consensus_std, n_consensus_mean, n_consensus_std, show=True,
+                    save_name='maintained', save=True)
 
