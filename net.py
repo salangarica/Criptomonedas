@@ -7,9 +7,10 @@ import copy
 import datetime
 import argparse
 from pylab import rcParams
+from collections import Counter
 import os
-rcParams['figure.figsize'] = 17, 7
-rcParams.update({'font.size': 15})
+rcParams['figure.figsize'] = 21, 7
+rcParams.update({'font.size': 20})
 
 
 class Network:
@@ -158,23 +159,26 @@ class Network:
         Thus, this method calculates the number of node that are in consensus with each node of the graph, put the numbers in a list and return.
         """
         iteration_list = []
+        txs_list = []
         for i in self.G.nodes(data=False):
             Txs_i = self.G.node[i]['Txs']
             Txs_i = set([Tx['uniqueID'] for Tx in Txs_i])
             consensus_i = 0
+            txs_list.append(len(Txs_i))
             for j in self.G.nodes(data=False):
                 Txs_j = self.G.node[j]['Txs']
                 Txs_j = set([Tx['uniqueID'] for Tx in Txs_j])
                 if Txs_i == Txs_j:
                     consensus_i += 1
             iteration_list.append(consensus_i)
-        return iteration_list
+        return iteration_list, txs_list
 
     def simulation(self, txs_per_round=10, verbose=False):
         """
         Generate transactions, broadcast each one, get the consensus and save it in a list. In each iteration, save a dict with the following info:
-            - 'max_consensus': 
-            - 'n_consensus': 
+            - 'max_consensus': Biggest consensus in the network
+            - 'n_consensus': Number of consensus in the network
+            - 'transactions_p': Percentaje of transactions in the pool of the nodes in the biggest consensus
         Finally, return a list with all consensus and dictionaries created.
         """
         consensus_array = []
@@ -184,9 +188,17 @@ class Network:
 
             self.broadcast_transactions(txs_list)
 
-            iteration_list = self.consensus()
+            iteration_list, txs_list = self.consensus()
             consensus_array.append(iteration_list)
-            consensus_dict['it{}'.format(i + 1)] = {'max_consensus': max(iteration_list), 'n_consensus': len(set(iteration_list))}
+            max_consensus_index = np.argmax(np.array(iteration_list))
+            tx_consensus = txs_list[max_consensus_index]/((i + 1)*txs_per_round)
+            n_consensus_dict = dict(Counter(iteration_list))
+            n_consensus = 0
+            for key, value in n_consensus_dict.items():
+                n_consensus += value/key
+            consensus_dict['it{}'.format(i + 1)] = {'max_consensus': max(iteration_list),
+                                                    'n_consensus': n_consensus,
+                                                    'transactions_p': tx_consensus}
 
             if verbose:
                 print('it: {} | Max_consensus: {} | N_consensus: {}'.format(i + 1, consensus_dict['max_consensus'], consensus_dict['n_consensus']))
@@ -200,6 +212,7 @@ def simulate_N(N=100, maintain_graph=False, **kwargs):
     '''
     max_consensus = []
     n_consensus = []
+    transactions_p = []
     G = Network(**kwargs).GenNetwork()
     for i in range(N):
         print('Simulation: {}|{}'.format(i + 1, N))
@@ -211,23 +224,29 @@ def simulate_N(N=100, maintain_graph=False, **kwargs):
         _, consensus_dict_i = net.simulation()
         max_consensus_i = []
         n_consensus_i = []
+        transactions_p_i = []
         for t in range(kwargs['k']):
             max_consensus_i.append(consensus_dict_i['it{}'.format(t+1)]['max_consensus'])
             n_consensus_i.append(consensus_dict_i['it{}'.format(t+1)]['n_consensus'])
+            transactions_p_i.append(consensus_dict_i['it{}'.format(t+1)]['transactions_p'])
         max_consensus.append(max_consensus_i)
         n_consensus.append(n_consensus_i)
+        transactions_p.append(transactions_p_i)
 
     # consensus_list in Nxk
     max_consensus = np.array(max_consensus)
     n_consensus = np.array(n_consensus)
+    transactions_p = np.array(transactions_p)
 
     # Statistics
     max_consensus_mean = max_consensus.mean(axis=0)
     max_consensus_std = max_consensus.std(axis=0)
     n_consensus_mean = n_consensus.mean(axis=0)
     n_consensus_std = n_consensus.std(axis=0)
+    transactions_p_mean = transactions_p.mean(axis=0)
+    transactions_p_std = transactions_p.std(axis=0)
 
-    return [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std]
+    return [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std], [transactions_p_mean, transactions_p_std]
 
 
 def vary_parameters(N=100, maintain_graph=False, initial_params={'n': 20, 'p': 0.4, 'ppp': 0.1, 'k': 30, 'pp': 0.2}, vary_dimension={'k':[10, 110, 10]}):
@@ -242,9 +261,11 @@ def vary_parameters(N=100, maintain_graph=False, initial_params={'n': 20, 'p': 0
     for value in vary_dimension_values:
         params = copy.deepcopy(initial_params)
         params[vary_dimension_key] = value
-        [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std] = simulate_N(N=N, maintain_graph=maintain_graph, **params)
+        [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std],  [transactions_p_mean, transactions_p_std]\
+            = simulate_N(N=N, maintain_graph=maintain_graph, **params)
         dicto_vary[(vary_dimension_key, value)] = {'max_consensus': [max_consensus_mean[-1], max_consensus_std[-1]],
-                                                                 'n_consensus':[n_consensus_mean[-1], n_consensus_std[-1]]}
+                                                                 'n_consensus':[n_consensus_mean[-1], n_consensus_std[-1]],
+                                                   'transactions_p': [transactions_p_mean[-1], transactions_p_std[-1]]}
 
         print('{}:{} -> Max_consensus: {} | N_consensus: {}'.format(vary_dimension_key, value, max_consensus_mean[-1], n_consensus_mean[-1]))
 
@@ -253,8 +274,8 @@ def vary_parameters(N=100, maintain_graph=False, initial_params={'n': 20, 'p': 0
 
 ####################################### Plotting functions #######################################################
 
-def plot_simulation(max_consensus_mean, max_consensus_std, n_consensus_mean, n_consensus_std, show=True,
-                    folder='Imgs/', save_name='im', save=False):
+def plot_simulation(max_consensus_mean, max_consensus_std, n_consensus_mean, n_consensus_std, transactions_p_mean, transactions_p_std,
+                    show=True, folder='Imgs/', save_name='im', save=False):
     '''
     Plot the results of simulate_N function
     '''
@@ -264,25 +285,36 @@ def plot_simulation(max_consensus_mean, max_consensus_std, n_consensus_mean, n_c
     its = [i + 1 for i in range(max_consensus_mean.shape[0])]
 
     plt.figure()
-    plt.title('Max consensus', fontsize=20)
+    plt.title('Max consensus', fontsize=25)
     plt.errorbar(its, max_consensus_mean, max_consensus_std, ecolor='k', alpha=0.5)
-    plt.plot(its, max_consensus_mean, linewidth=2)
+    plt.plot(its, max_consensus_mean, 'darkblue', linewidth=2)
     plt.grid()
-    plt.xlabel('Iterations (k)', fontsize=17)
+    plt.xlabel('Iterations (k)', fontsize=22)
     plt.tight_layout()
     if save:
         plt.savefig('{}{}_max_consensus.svg'.format(folder, save_name))
 
     plt.figure()
-    plt.title('N consensus', fontsize=20)
-    plt.plot(its, n_consensus_mean, linewidth=2)
+    plt.title('N consensus', fontsize=25)
+    plt.plot(its, n_consensus_mean, 'maroon', linewidth=2)
     plt.errorbar(its, n_consensus_mean, n_consensus_std, ecolor='k', alpha=0.5)
-    plt.xlabel('Iterations (k)', fontsize=17)
+    plt.xlabel('Iterations (k)', fontsize=22)
     plt.grid()
     plt.tight_layout()
 
     if save:
         plt.savefig('{}{}_n_consensus.svg'.format(folder, save_name))
+
+    plt.figure()
+    plt.title('% of Transactions in consensus', fontsize=25)
+    plt.plot(its, transactions_p_mean, 'darkgreen', linewidth=2)
+    plt.errorbar(its, transactions_p_mean, transactions_p_std, ecolor='k', alpha=0.5)
+    plt.xlabel('Iterations (k)', fontsize=22)
+    plt.grid()
+    plt.tight_layout()
+
+    if save:
+        plt.savefig('{}{}_transactions_p.svg'.format(folder, save_name))
 
     if show:
         plt.show()
@@ -290,6 +322,9 @@ def plot_simulation(max_consensus_mean, max_consensus_std, n_consensus_mean, n_c
 
 
 def plot_vary_parameters(dict_vary, show=True, folder='Imgs/', save_name='im', save=False):
+    '''
+    Plot the results of vary_parameters function
+    '''
 
     if not os.path.exists(folder):
         os.makedirs(folder)
@@ -299,28 +334,41 @@ def plot_vary_parameters(dict_vary, show=True, folder='Imgs/', save_name='im', s
     max_consensus_std = [dict_vary[key]['max_consensus'][1] for key in keys]
     n_consensus_mean = [dict_vary[key]['n_consensus'][0] for key in keys]
     n_consensus_std = [dict_vary[key]['n_consensus'][1] for key in keys]
+    transactions_p_mean = [dict_vary[key]['transactions_p'][0] for key in keys]
+    transactions_p_std = [dict_vary[key]['transactions_p'][1] for key in keys]
+
     x_axis = [key[1] for key in keys]
     vary_dimension = keys[0][0]
 
     plt.figure()
-    plt.title('Max consensus varying {}'.format(vary_dimension), fontsize=20)
+    plt.title('Max consensus varying {}'.format(vary_dimension), fontsize=25)
     plt.errorbar(x_axis, max_consensus_mean, max_consensus_std, ecolor='firebrick', alpha=0.5)
     plt.plot(x_axis, max_consensus_mean, linewidth=2)
     plt.grid()
-    plt.xlabel(vary_dimension, fontsize=17)
+    plt.xlabel(vary_dimension, fontsize=22)
     plt.tight_layout()
     if save:
         plt.savefig('{}{}_max_consensus.svg'.format(folder, save_name))
 
     plt.figure()
-    plt.title('N consensus varying {}'.format(vary_dimension), fontsize=20)
+    plt.title('N consensus varying {}'.format(vary_dimension), fontsize=25)
     plt.errorbar(x_axis, n_consensus_mean, n_consensus_std, ecolor='firebrick', alpha=0.5)
-    plt.plot(x_axis, n_consensus_mean, linewidth=2)
+    plt.plot(x_axis, n_consensus_mean, 'maroon', linewidth=2)
     plt.grid()
-    plt.xlabel(vary_dimension, fontsize=17)
+    plt.xlabel(vary_dimension, fontsize=22)
     plt.tight_layout()
     if save:
         plt.savefig('{}{}_n_consensus.svg'.format(folder, save_name))
+
+    plt.figure()
+    plt.title('% of Transactions in consensus varying {}'.format(vary_dimension), fontsize=25)
+    plt.errorbar(x_axis, transactions_p_mean, transactions_p_std, ecolor='firebrick', alpha=0.5)
+    plt.plot(x_axis, transactions_p_mean, 'firebrick', linewidth=2)
+    plt.grid()
+    plt.xlabel(vary_dimension, fontsize=22)
+    plt.tight_layout()
+    if save:
+        plt.savefig('{}{}_transactions_p.svg'.format(folder, save_name))
 
     if show:
         plt.show()
@@ -335,9 +383,10 @@ if __name__ == '__main__':
     parser.add_argument("n", help="Number of simulations that will be calculated", default=15, type=int, nargs='?')
     args = parser.parse_args()
 
-    [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std] = simulate_N(N=args.n, maintain_graph=False, **arguments)
+    [max_consensus_mean, max_consensus_std], [n_consensus_mean, n_consensus_std], [transactions_p_mean, transactions_p_std]\
+        = simulate_N(N=args.n, maintain_graph=False, **arguments)
 
     print('Simulations finished in', datetime.datetime.now() - t0)
-    plot_simulation(max_consensus_mean, max_consensus_std, n_consensus_mean, n_consensus_std, show=True,
+    plot_simulation(max_consensus_mean, max_consensus_std, n_consensus_mean, n_consensus_std, transactions_p_mean, transactions_p_std, show=True,
                     save_name='maintained', save=True)
 
